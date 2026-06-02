@@ -15,18 +15,15 @@ namespace CSAnalyzer.Service
         private static readonly string SteamApiKey = ConfigurationManager.AppSettings["SteamApiKey"];
         private static readonly string FaceitApiKey = ConfigurationManager.AppSettings["FaceitApiKey"];
 
-        // HttpClient должен быть статическим, чтобы избежать исчерпания сокетов
         private static readonly HttpClient client = new HttpClient();
 
         static CSService()
         {
-            // Принудительно включаем TLS 1.2 для исходящих HTTPS-запросов
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
         }
 
         public PlayerProfile GetProfile(string steamId)
         {
-            // WCF синхронен по умолчанию в простых контрактах, оборачиваем асинхронные вызовы
             return Task.Run(() => GetProfileAsync(steamId)).Result;
         }
 
@@ -36,7 +33,6 @@ namespace CSAnalyzer.Service
 
             try
             {
-                // 1. Steam: Базовая информация (Ник, Аватар, Дата регистрации)
                 string steamSummaryUrl = $"http://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key={SteamApiKey}&steamids={steamId}";
                 var summaryJson = JObject.Parse(await client.GetStringAsync(steamSummaryUrl));
                 var player = summaryJson["response"]["players"]?[0];
@@ -53,10 +49,9 @@ namespace CSAnalyzer.Service
                 if (player["timecreated"] != null)
                 {
                     DateTime dt = new DateTime(1970, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc).AddSeconds((double)player["timecreated"]);
-                    profile.AccountCreatedDate = dt.ToString("MMM dd, yyyy"); // Формат Oct 01, 2024
+                    profile.AccountCreatedDate = dt.ToString("MMM dd, yyyy");
                 }
 
-                // 2. Steam: Баны
                 string bansUrl = $"http://api.steampowered.com/ISteamUser/GetPlayerBans/v1/?key={SteamApiKey}&steamids={steamId}";
                 var banData = JObject.Parse(await client.GetStringAsync(bansUrl))["players"]?[0];
                 if (banData != null)
@@ -65,7 +60,6 @@ namespace CSAnalyzer.Service
                     profile.IsTradeBanned = banData["EconomyBan"]?.ToString() != "none";
                 }
 
-                // 3. Steam: Часы в CS2 (Всего и за 2 недели)
                 try
                 {
                     string gamesUrl = $"http://api.steampowered.com/IPlayerService/GetOwnedGames/v0001/?key={SteamApiKey}&steamid={steamId}&format=json";
@@ -98,9 +92,8 @@ namespace CSAnalyzer.Service
                         }
                     }
                 }
-                catch { /* Игнорируем, если игры скрыты настройками приватности */ }
+                catch { /* Ignore if private */ }
 
-                // 4. Steam: Уровень
                 try
                 {
                     string levelUrl = $"http://api.steampowered.com/IPlayerService/GetSteamLevel/v1/?key={SteamApiKey}&steamid={steamId}";
@@ -109,7 +102,6 @@ namespace CSAnalyzer.Service
                 }
                 catch { }
 
-                // 5. Steam: Друзья
                 try
                 {
                     string friendsUrl = $"http://api.steampowered.com/ISteamUser/GetFriendList/v0001/?key={SteamApiKey}&steamid={steamId}&relationship=friend";
@@ -121,9 +113,8 @@ namespace CSAnalyzer.Service
                         if (friendsList != null) profile.FriendsCount = friendsList.Count;
                     }
                 }
-                catch { /* Игнорируем, если список друзей скрыт */ }
+                catch { /* Ignore if private */ }
 
-                // 6. Faceit: Базовый профиль и ELO
                 using (var faceitReq = new HttpRequestMessage(HttpMethod.Get, $"https://open.faceit.com/data/v4/players?game=cs2&game_player_id={steamId}"))
                 {
                     faceitReq.Headers.Add("Authorization", $"Bearer {FaceitApiKey}");
@@ -142,7 +133,6 @@ namespace CSAnalyzer.Service
                             profile.FaceitElo = (int?)cs2Data["faceit_elo"];
                         }
 
-                        // 7. Faceit: Детальная статистика
                         string playerId = faceitJson["player_id"]?.ToString();
                         if (!string.IsNullOrEmpty(playerId))
                         {
@@ -179,7 +169,7 @@ namespace CSAnalyzer.Service
             }
             catch (Exception ex)
             {
-                profile.Error = $"Ошибка при получении данных: {ex.Message}";
+                profile.Error = $"Data access error: {ex.Message}";
             }
 
             return profile;
